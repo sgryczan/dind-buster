@@ -1,4 +1,4 @@
-FROM golang:1.16-buster
+FROM golang:1.23-bookworm
 
 # Install docker, make, git, kubectl, helm
 RUN apt-get update && \
@@ -13,26 +13,22 @@ RUN apt-get update && \
       make \
       kmod \
       procps && \
-    curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add - && \
-    echo "deb [arch=amd64] https://download.docker.com/linux/debian buster stable" | tee /etc/apt/sources.list.d/docker.list && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian bookworm stable" | tee /etc/apt/sources.list.d/docker.list && \
     apt-get update && \
     apt-get install --no-install-recommends -y docker-ce && \
     apt-get autoclean && \
     rm -rf /var/lib/apt/lists/*
 
-RUN mkdir /etc/docker && \
+RUN mkdir -p /etc/docker && \
     jq -n '{"experimental": true, "debug": true}' > /etc/docker/daemon.json
 
-RUN curl -LO https://golang.org/dl/go1.16.linux-amd64.tar.gz && \
-    tar -C /usr/local -xzf go1.16.linux-amd64.tar.gz && \
-    export PATH=$PATH:/usr/local/go/bin && \
-    go version && \
-    rm go1.16.linux-amd64.tar.gz
+# Go 1.23 is already provided by the base image
 
 RUN KIND_TMP_DIR=$(mktemp -d) && \
 	cd $KIND_TMP_DIR && \
 	go mod init tmp && \
-	go get sigs.k8s.io/kind@v0.9.0 && \
+	go install sigs.k8s.io/kind@v0.30.0 && \
 	rm -rf $KIND_TMP_DIR && \
     kind version
 
@@ -52,7 +48,7 @@ RUN set -x && \
 VOLUME /var/lib/docker
 VOLUME /var/log/docker
 EXPOSE 2375 2376
-ENV container docker
+ENV container=docker
 
 COPY entrypoint.sh /entrypoint.sh
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

@@ -29,7 +29,13 @@ fi
 # We need to make sure cgroups created by the docker daemon do not
 # interfere with other cgroups on the host, and do not leak after this
 # container is terminated.
-if [ -f /sys/fs/cgroup/systemd/release_agent ]; then
+
+# Check if we're using cgroup v2
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+  # cgroup v2
+  CGROUP_PARENT="/docker"
+elif [ -f /sys/fs/cgroup/systemd/release_agent ]; then
+  # cgroup v1 with systemd
   # This means the user has bind mounted host /sys/fs/cgroup to the
   # same location in the container (e.g., using the following docker
   # run flags: `-v /sys/fs/cgroup:/sys/fs/cgroup`). In this case, we
@@ -39,6 +45,7 @@ if [ -f /sys/fs/cgroup/systemd/release_agent ]; then
   # cgroup hierarchy.
   CGROUP_PARENT="$(grep systemd /proc/self/cgroup | cut -d: -f3)/docker"
 else
+  # cgroup v1 without systemd
   CGROUP_PARENT="/docker"
 
   # For each cgroup subsystem, Docker does a bind mount from the
@@ -50,14 +57,18 @@ else
   # `/proc/<pid>/cgroup` is not affected by the bind mount. The
   # following is a workaround to recreate the original cgroup
   # environment by doing another bind mount for each subsystem.
-  CURRENT_CGROUP=$(grep systemd /proc/self/cgroup | cut -d: -f3)
-  CGROUP_SUBSYSTEMS=$(findmnt -lun -o source,target -t cgroup | grep "${CURRENT_CGROUP}" | awk '{print $2}')
+  CURRENT_CGROUP=$(grep -E ':[^:]+:/' /proc/self/cgroup | head -n1 | cut -d: -f3)
+  if [ -n "${CURRENT_CGROUP}" ]; then
+    CGROUP_SUBSYSTEMS=$(findmnt -lun -o source,target -t cgroup | grep "${CURRENT_CGROUP}" | awk '{print $2}')
 
-  echo "${CGROUP_SUBSYSTEMS}" |
-  while IFS= read -r SUBSYSTEM; do
-    mkdir -p "${SUBSYSTEM}${CURRENT_CGROUP}"
-    mount --bind "${SUBSYSTEM}" "${SUBSYSTEM}${CURRENT_CGROUP}"
-  done
+    echo "${CGROUP_SUBSYSTEMS}" |
+    while IFS= read -r SUBSYSTEM; do
+      if [ -n "${SUBSYSTEM}" ]; then
+        mkdir -p "${SUBSYSTEM}${CURRENT_CGROUP}"
+        mount --bind "${SUBSYSTEM}" "${SUBSYSTEM}${CURRENT_CGROUP}"
+      fi
+    done
+  fi
 fi
 
 setsid dockerd \
